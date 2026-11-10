@@ -1,7 +1,9 @@
 # TravelMemory - Deployment on AWS EC2
 
-**Live app:** https://travel.rajeshdevops.in (goes through the load balancer)
+**App URL:** https://travel.rajeshdevops.in (goes through the load balancer)
 **Frontend server direct:** https://fe.rajeshdevops.in (A record to frontend-1)
+
+> Note: all AWS resources were deleted after testing to avoid charges, so these links are not live anymore. The screenshots below were taken while everything was running.
 
 TravelMemory is a MERN app (forked from [UnpredictablePrashant/TravelMemory](https://github.com/UnpredictablePrashant/TravelMemory)). In this project I deployed it on AWS EC2. The setup has 2 frontend and 2 backend servers behind an Application Load Balancer, nginx on every server, MongoDB Atlas as the database and my own domain connected through Cloudflare.
 
@@ -40,7 +42,7 @@ How a request moves:
 | MongoDB Atlas (M0 free, AWS Mumbai) | Database |
 | Cloudflare (free plan) | DNS, proxy and HTTPS |
 | GoDaddy | Domain `rajeshdevops.in` |
-| AWS CLI + PowerShell | Creating all AWS resources from a script |
+| AWS CLI | Creating the AWS resources |
 
 ## Files I added to the repo
 
@@ -48,10 +50,6 @@ How a request moves:
 deploy/
   nginx-backend.conf     nginx reverse proxy config for the backend servers
   nginx-frontend.conf    nginx config for the frontend servers
-  backend-setup.sh       installs node, pm2, nginx and starts the backend
-  frontend-setup.sh      installs node and nginx, builds React, copies build to nginx
-  aws-setup.ps1          creates all AWS resources (security groups, EC2, EIP, target groups, ALB)
-  aws-cleanup.ps1        deletes everything created by aws-setup.ps1
 docs/
   architecture.png / architecture.drawio
   screenshots/
@@ -173,26 +171,20 @@ server {
 }
 ```
 
-t3.micro has only 1 GB RAM and the React build needs more, so the setup script adds 2 GB swap before building.
+t3.micro has only 1 GB RAM and the React build needs more, so 2 GB swap is added on the frontend servers before building.
 
 ## Step 4 - AWS infrastructure (EC2, security groups, EIP)
 
-I created everything with the AWS CLI using [deploy/aws-setup.ps1](deploy/aws-setup.ps1), so it can be repeated or deleted in one go. Region is `ap-south-1` (Mumbai) and it uses the default VPC.
+I created the AWS resources with the AWS CLI. Region is `ap-south-1` (Mumbai) and everything is in the default VPC. Order:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File deploy\aws-setup.ps1
-```
+1. Key pair `travel-key`
+2. 3 security groups
+3. 4 EC2 instances (Ubuntu 24.04, t3.micro), spread over 2 availability zones
+4. Elastic IP for frontend-1
+5. 2 target groups, with the instances registered
+6. Application Load Balancer, listener and path rule
 
-The script asks for the MongoDB connection string (hidden input, not saved anywhere) and then:
-
-1. Creates key pair `travel-key`
-2. Creates 3 security groups
-3. Launches 4 EC2 instances (Ubuntu 24.04, t3.micro), spread over 2 availability zones
-4. Gives frontend-1 an Elastic IP
-5. Creates 2 target groups and registers the instances
-6. Creates the Application Load Balancer, listener and path rule
-
-Each instance gets a **user data** script. On first boot it clones this repo and runs `backend-setup.sh` or `frontend-setup.sh`, so no manual SSH work is needed.
+Each instance got **user data** that runs on first boot. It clones this repo, installs Node.js 20, nginx (and pm2 on the backend), writes the `.env`, copies the nginx config from `deploy/` and starts the app. The frontend servers also build React and copy the build to `/var/www/travelmemory`. So no manual SSH work was needed on the servers.
 
 | Server | AZ | Role |
 |---|---|---|
@@ -289,7 +281,7 @@ To check that the load balancer really handles a server going down:
 
 1. **`.in` domain on Cloudflare** - Cloudflare Registrar gave an error that `.in` is not supported. Bought the domain on GoDaddy and pointed its nameservers to Cloudflare instead. The new domain also took some time to show up in DNS.
 2. **Backend kept crashing** - After the first deploy the backend target group was unhealthy. `pm2 status` showed the app restarted more than 190 times and `pm2 logs` said Atlas was blocking the connection. The backend server IPs were not in the Atlas access list. After adding both IPs the app connected on its next automatic restart, no change was needed on the servers.
-3. **Script error "The filter 'null' is invalid"** - The first run of `aws-setup.ps1` failed at step 1. In PowerShell an unquoted value like `Name=isDefault,Values=true` is treated as an array because of the comma. Putting the filter values in quotes fixed it.
+3. **AWS CLI error "The filter 'null' is invalid"** - The first `describe-vpcs` call failed. In PowerShell an unquoted value like `Name=isDefault,Values=true` is treated as an array because of the comma. Putting the filter values in quotes fixed it.
 4. **Port 3000 vs 3001** - The repo code defaults to 3001 but the assignment says 3000, so I set the port in `.env` and pointed nginx to 3000.
 
 ## Security
@@ -307,15 +299,11 @@ To check that the load balancer really handles a server going down:
 - **SSL is Flexible**, so traffic between Cloudflare and AWS is plain HTTP. Better option is an ACM certificate on an HTTPS listener and Cloudflare mode **Full (strict)**.
 - `alb-sg` allows the whole internet. It could allow only Cloudflare IP ranges.
 - Backend public IPs change if the instances are stopped and started, and then Atlas must be updated. Elastic IPs or a NAT gateway would avoid that.
-- Instances are created by the script, not by an Auto Scaling Group. A launch template + ASG would replace a failed server automatically.
+- Instances were created one by one, not by an Auto Scaling Group. A launch template + ASG would replace a failed server automatically.
 
 ## Cost and cleanup
 
-The load balancer and the public IPv4 addresses are charged per hour. To delete everything:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File deploy\aws-cleanup.ps1
-```
+The load balancer and the public IPv4 addresses are charged per hour, so after testing I deleted everything: load balancer, target groups, Elastic IP, the 4 instances, the 3 security groups and the key pair.
 
 ---
 
