@@ -20,7 +20,7 @@ foreach ($tg in "tm-backend-tg", "tm-frontend-tg") {
 }
 
 Write-Host "Elastic IP..."
-$eips = aws ec2 describe-addresses --filters Name=tag:Project,Values=TravelMemory --query "Addresses[].[AllocationId,AssociationId]" --output text
+$eips = aws ec2 describe-addresses --filters "Name=tag:Project,Values=TravelMemory" --query "Addresses[].[AllocationId,AssociationId]" --output text
 foreach ($line in ($eips -split "`n" | Where-Object { $_.Trim() })) {
     $parts = $line -split "\s+"
     if ($parts[1] -and $parts[1] -ne "None") { aws ec2 disassociate-address --association-id $parts[1] }
@@ -28,8 +28,8 @@ foreach ($line in ($eips -split "`n" | Where-Object { $_.Trim() })) {
 }
 
 Write-Host "EC2 instances..."
-$ids = aws ec2 describe-instances --filters Name=tag:Project,Values=TravelMemory `
-       Name=instance-state-name,Values=pending,running,stopping,stopped --query "Reservations[].Instances[].InstanceId" --output text
+$ids = aws ec2 describe-instances --filters "Name=tag:Project,Values=TravelMemory" `
+       "Name=instance-state-name,Values=pending,running,stopping,stopped" --query "Reservations[].Instances[].InstanceId" --output text
 if ($ids) {
     $idList = $ids -split "\s+" | Where-Object { $_ }
     aws ec2 terminate-instances --instance-ids $idList | Out-Null

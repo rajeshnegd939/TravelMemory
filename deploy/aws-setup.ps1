@@ -41,8 +41,8 @@ if ($MongoUri -notmatch '^mongodb(\+srv)?://') { throw "That does not look like 
 
 # ---------- network ----------
 Write-Host "`n[1/7] Reading default VPC and subnets..." -ForegroundColor Cyan
-$VpcId   = Invoke-Aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query "Vpcs[0].VpcId" --output text
-$Subnets = (Invoke-Aws ec2 describe-subnets --filters Name=default-for-az,Values=true `
+$VpcId   = Invoke-Aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" --query "Vpcs[0].VpcId" --output text
+$Subnets = (Invoke-Aws ec2 describe-subnets --filters "Name=default-for-az,Values=true" `
             --query "sort_by(Subnets,&AvailabilityZone)[].SubnetId" --output text) -split "\s+"
 $SubnetA = $Subnets[0]; $SubnetB = $Subnets[1]
 $MyIp    = (Invoke-RestMethod https://checkip.amazonaws.com).Trim()
@@ -111,11 +111,13 @@ Write-LfFile $FeUdFile $FrontendUserData
 # ---------- EC2 instances ----------
 Write-Host "`n[4/7] Launching 4 EC2 instances..." -ForegroundColor Cyan
 function New-Instance($Name, $SubnetId, $UdFile, [string[]]$SgIds) {
-    Invoke-Aws ec2 run-instances --image-id $AmiId --instance-type $InstanceType --key-name $KeyName `
-        --subnet-id $SubnetId --security-group-ids $SgIds --associate-public-ip-address `
+    $id = & aws ec2 run-instances --image-id $AmiId --instance-type $InstanceType --key-name $KeyName `
+        --subnet-id $SubnetId --security-group-ids @SgIds --associate-public-ip-address `
         --user-data "file://$UdFile" `
         --tag-specifications "ResourceType=instance,Tags=[{$Tags},{Key=Name,Value=$Name}]" `
         --query "Instances[0].InstanceId" --output text
+    if ($LASTEXITCODE -ne 0) { throw "Could not launch $Name" }
+    return $id
 }
 try {
     $Be1 = New-Instance "tm-backend-1"  $SubnetA $BeUdFile @($AppSg)
